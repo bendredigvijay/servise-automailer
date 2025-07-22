@@ -2,7 +2,7 @@
 const getEmailTemplate = (contact, userEmail) => {
   return `Dear ${contact.hrName},
 
-I am excited to apply for the ${contact.jobPosition} position at ${contact.companyName}. With experience in modern web development, I have developed strong expertise in ${contact.requiredSkills.slice(0, 3).join(', ')}.
+I am excited to apply for the ${contact.jobPosition} position at ${contact.companyName}. With 2+ years of experience as a ${contact.jobPosition}, I have developed strong expertise in ${contact.requiredSkills.slice(0, 3).join(', ')}.
 
 What I bring:
 • ${contact.jobPosition} experience with modern technologies
@@ -13,7 +13,7 @@ What I bring:
 
 I am particularly impressed by ${contact.companyName}'s reputation in the industry and believe my technical skills and enthusiasm would contribute to your team's success.
 
-My resume is attached for your review. I would love to discuss how I can add value to ${contact.companyName}. I have also attached my resume for your reference - please go through it and let me know if you have any questions or need further information.
+My resume is attached for your review. I would love to discuss how I can add value to ${contact.companyName}. Please go through it and let me know if you have any questions or need further information.
 
 Thank you for your consideration.
 
