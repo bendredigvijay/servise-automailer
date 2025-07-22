@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// NEW: Direct API routes (no /contacts prefix)
+// API routes
 app.use('/api', contactRoutes);
 app.use('/api/emails', emailRoutes);
 
@@ -24,8 +24,14 @@ app.get('/api/health', (req, res) => {
     endpoints: [
       'GET /api/getAllContacts',
       'POST /api/addContact',
-      'DELETE /api/deleteContact/:id',
-      'POST /api/emails/bulk-send'
+      'PUT /api/updateContact/:id',
+      'DELETE /api/deleteContact/:id (soft delete)',
+      'GET /api/getDeletedContacts',
+      'POST /api/restoreContact/:id',
+      'DELETE /api/permanentDelete/:id',
+      'POST /api/emails/bulk-send',
+      'GET /api/emails/logs',
+      'GET /api/emails/stats'
     ]
   });
 });
@@ -43,9 +49,16 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 New API Endpoints:`);
-  console.log(`   GET  /api/getAllContacts`);
-  console.log(`   POST /api/addContact`);
-  console.log(`   DELETE /api/deleteContact/:id`);
-  console.log(`   POST /api/emails/bulk-send`);
+  console.log(`📍 API Endpoints:`);
+  console.log(`   📋 Contacts:`);
+  console.log(`      GET  /api/getAllContacts`);
+  console.log(`      POST /api/addContact`);
+  console.log(`      PUT  /api/updateContact/:id`);
+  console.log(`      DELETE /api/deleteContact/:id (soft)`);
+  console.log(`      GET  /api/getDeletedContacts`);
+  console.log(`      POST /api/restoreContact/:id`);
+  console.log(`   📧 Emails:`);
+  console.log(`      POST /api/emails/bulk-send`);
+  console.log(`      GET  /api/emails/logs`);
+  console.log(`      GET  /api/emails/stats`);
 });

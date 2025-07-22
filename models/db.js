@@ -37,7 +37,8 @@ const createSchemaAndTables = async () => {
         job_position VARCHAR(100) NOT NULL,
         required_skills TEXT[],
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL
       )
     `);
     console.log('✅ Table created: automailer_schema.contacts');
@@ -60,9 +61,17 @@ const createSchemaAndTables = async () => {
     `);
     console.log('✅ Table created: automailer_schema.email_logs');
 
+    // Add soft delete column if it doesn't exist
+    await pool.query(`
+      ALTER TABLE automailer_schema.contacts 
+      ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+    `);
+    console.log('✅ Soft delete column added/verified');
+
     // Create indexes for better performance
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_contacts_email ON automailer_schema.contacts(email);
+      CREATE INDEX IF NOT EXISTS idx_contacts_deleted_at ON automailer_schema.contacts(deleted_at);
       CREATE INDEX IF NOT EXISTS idx_email_logs_batch_id ON automailer_schema.email_logs(batch_id);
       CREATE INDEX IF NOT EXISTS idx_email_logs_status ON automailer_schema.email_logs(status);
     `);

@@ -1,20 +1,91 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const nodemailer = require('nodemailer');
 const pool = require('../models/db');
+const fs = require('fs');
+const { getEmailTemplate } = require('../templates/emailTemplate');
 
-// GET /api/getAllContacts (NEW ENDPOINT)
-router.get('/getAllContacts', async (req, res) => {
+// ✅ DEBUG: Check environment variables on startup
+console.log('🔍 EMAIL CONFIG DEBUG:', {
+  emailUser: process.env.EMAIL_USER,
+  emailPassExists: !!process.env.EMAIL_PASS,
+  emailPassLength: process.env.EMAIL_PASS ? process.env.EMAIL_PASS.length : 0,
+  emailPassPreview: process.env.EMAIL_PASS ? process.env.EMAIL_PASS.substring(0, 8) + '***' : 'NOT SET'
+});
+
+// File upload setup
+const storage = multer.diskStorage({
+  destination: './uploads/',
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
+// ✅ Gmail transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  pool: true,
+  maxConnections: 1,
+  rateDelta: 20000,
+  rateLimit: 5
+});
+
+// ✅ Verify transporter on startup
+transporter.verify((error, success) => {
+  if (error) {
+    console.log('❌ Gmail transporter verification failed:', error.message);
+  } else {
+    console.log('✅ Gmail transporter ready to send emails');
+    console.log('📧 Connected with:', process.env.EMAIL_USER);
+  }
+});
+
+// ✅ TEST AUTH ROUTE
+router.post('/test-auth', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM automailer_schema.contacts ORDER BY created_at DESC'
-    );
+    console.log('🧪 Testing Gmail authentication...');
+    
+    const testInfo = await transporter.sendMail({
+      from: `Digvijay Bendre <${process.env.EMAIL_USER}>`,
+      to: process.env.EMAIL_USER,
+      subject: 'AutoMailer Test - Working Perfectly!',
+      text: `
+Hi there!
+
+This is a test email from your AutoMailer system.
+
+✅ Gmail authentication is working perfectly
+✅ Your bulk email system is ready to use
+✅ Time: ${new Date().toLocaleString()}
+
+You can now start sending job applications!
+
+Best regards,
+Digvijay Bendre
+Email: ${process.env.EMAIL_USER}
+      `
+    });
+    
+    console.log('✅ Test email sent successfully!');
     
     res.json({
       success: true,
-      data: result.rows
+      message: 'Test email sent successfully! Check your inbox.',
+      messageId: testInfo.messageId
     });
+    
   } catch (error) {
-    console.error('Get contacts error:', error);
+    console.error('❌ Gmail auth test failed:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
@@ -22,76 +93,199 @@ router.get('/getAllContacts', async (req, res) => {
   }
 });
 
-// POST /api/addContact (NEW ENDPOINT)
-router.post('/addContact', async (req, res) => {
+// ✅ BULK EMAIL SEND - USING TEMPLATE FILE
+router.post('/bulk-send', upload.single('resume'), async (req, res) => {
   try {
-    const { hrName, email, companyName, jobPosition, requiredSkills } = req.body;
+    console.log('📤 BULK EMAIL REQUEST RECEIVED');
+    console.log('📎 File received:', req.file ? req.file.originalname : 'No file');
     
-    // Validate required fields
-    if (!hrName || !email || !companyName || !jobPosition || !requiredSkills) {
+    const { contactIds, contacts } = req.body;
+    const resumeFile = req.file;
+    
+    if (!resumeFile) {
       return res.status(400).json({
         success: false,
-        error: 'All fields are required'
+        message: 'Resume file required'
       });
     }
-    
-    const result = await pool.query(
-      `INSERT INTO automailer_schema.contacts (hr_name, email, company_name, job_position, required_skills) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [hrName, email, companyName, jobPosition, requiredSkills]
-    );
-    
-    console.log('✅ CONTACT ADDED TO DB:', result.rows[0]);
-    
-    res.status(201).json({
-      success: true,
-      message: 'Contact added successfully',
-      data: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Add contact error:', error);
-    
-    // Handle duplicate email error
-    if (error.code === '23505') {
-      return res.status(400).json({
-        success: false,
-        error: 'Contact with this email already exists'
-      });
-    }
-    
-    res.status(400).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
-// DELETE /api/deleteContact/:id (NEW ENDPOINT)
-router.delete('/deleteContact/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+    let contactsData = [];
     
-    const result = await pool.query(
-      'DELETE FROM automailer_schema.contacts WHERE id = $1 RETURNING *', 
-      [id]
-    );
-    
-    if (result.rows.length === 0) {
+    if (contacts) {
+      console.log('📋 Using direct contacts data');
+      contactsData = JSON.parse(contacts);
+    } else if (contactIds) {
+      console.log('📋 Using contactIds to fetch from database');
+      const contactIdsArray = JSON.parse(contactIds);
+      // Updated query to exclude soft-deleted contacts
+      const contactsQuery = `
+        SELECT * FROM automailer_schema.contacts 
+        WHERE id = ANY($1) AND deleted_at IS NULL
+      `;
+      const contactsResult = await pool.query(contactsQuery, [contactIdsArray]);
+      contactsData = contactsResult.rows.map(row => ({
+        id: row.id,
+        hrName: row.hr_name,
+        email: row.email,
+        companyName: row.company_name,
+        jobPosition: row.job_position,
+        requiredSkills: row.required_skills
+      }));
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Either contacts data or contactIds required'
+      });
+    }
+
+    if (contactsData.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Contact not found'
+        message: 'No active contacts found'
       });
     }
+
+    console.log(`📧 Starting Gmail bulk email process for ${contactsData.length} contacts`);
+
+    const batchId = `batch_${Date.now()}`;
+    const results = [];
+
+    for (let i = 0; i < contactsData.length; i++) {
+      const contact = contactsData[i];
+      
+      try {
+        // ✅ USING TEMPLATE FROM SEPARATE FILE
+        const emailContent = getEmailTemplate(contact, process.env.EMAIL_USER);
+        
+        console.log(`📧 Skills for ${contact.hrName}: ${contact.requiredSkills.join(', ')}`);
+
+        const subject = `Application for ${contact.jobPosition} position at ${contact.companyName} - Digvijay Bendre`;
+
+        const mailOptions = {
+          from: `Digvijay Bendre <${process.env.EMAIL_USER}>`,
+          to: contact.email,
+          subject: subject,
+          text: emailContent,
+          attachments: [{
+            filename: resumeFile.originalname,
+            path: resumeFile.path,
+            contentType: 'application/pdf'
+          }]
+        };
+
+        console.log(`📧 Sending email ${i + 1}/${contactsData.length} to: ${contact.hrName} (${contact.email})`);
+        
+        const info = await transporter.sendMail(mailOptions);
+        
+        // Log success to database
+        await pool.query(
+          `INSERT INTO automailer_schema.email_logs 
+           (batch_id, contact_id, email, subject, status, message_id, resume_filename, sent_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [batchId, contact.id, contact.email, subject, 'sent', info.messageId, resumeFile.originalname, new Date()]
+        );
+
+        results.push({
+          contactId: contact.id,
+          hrName: contact.hrName,
+          email: contact.email,
+          companyName: contact.companyName,
+          jobPosition: contact.jobPosition,
+          skills: contact.requiredSkills,
+          status: 'sent',
+          messageId: info.messageId
+        });
+
+        console.log(`✅ Email sent to: ${contact.hrName} with skills: ${contact.requiredSkills.join(', ')}`);
+        
+        // Gmail rate limiting
+        if (i < contactsData.length - 1) {
+          console.log(`⏳ Waiting 3 seconds...`);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+      } catch (emailError) {
+        console.error(`❌ Email failed for ${contact.email}:`, emailError.message);
+        
+        await pool.query(
+          `INSERT INTO automailer_schema.email_logs 
+           (batch_id, contact_id, email, subject, status, error_message, resume_filename) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [batchId, contact.id, contact.email, `Application for ${contact.jobPosition}`, 'failed', emailError.message, resumeFile.originalname]
+        );
+
+        results.push({
+          contactId: contact.id,
+          hrName: contact.hrName,
+          email: contact.email,
+          companyName: contact.companyName,
+          jobPosition: contact.jobPosition,
+          skills: contact.requiredSkills,
+          status: 'failed',
+          error: emailError.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    if (fs.existsSync(resumeFile.path)) {
+      fs.unlinkSync(resumeFile.path);
+      console.log('🗑️ Temporary resume file deleted');
+    }
+
+    const successCount = results.filter(r => r.status === 'sent').length;
+    const failedCount = results.filter(r => r.status === 'failed').length;
+
+    console.log(`\n🎉 EMAIL SENDING COMPLETED!`);
+    console.log(`   📧 Total: ${contactsData.length}`);
+    console.log(`   ✅ Sent: ${successCount}`);
+    console.log(`   ❌ Failed: ${failedCount}`);
+
+    res.json({
+      success: true,
+      message: `Email sending completed! ${successCount} sent successfully, ${failedCount} failed`,
+      data: {
+        batchId,
+        totalContacts: contactsData.length,
+        successCount,
+        failedCount,
+        results
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ BULK EMAIL ERROR:', error);
     
-    console.log('🗑️ CONTACT DELETED FROM DB:', result.rows[0]);
+    // Clean up file if error occurs
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send bulk emails',
+      error: error.message
+    });
+  }
+});
+
+// Get email logs with contact details (excluding soft-deleted contacts)
+router.get('/logs', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT el.*, c.hr_name, c.company_name 
+      FROM automailer_schema.email_logs el
+      LEFT JOIN automailer_schema.contacts c ON el.contact_id = c.id
+      ORDER BY el.created_at DESC
+      LIMIT 50
+    `);
     
     res.json({
       success: true,
-      message: 'Contact deleted successfully',
-      data: result.rows[0]
+      data: result.rows,
+      count: result.rows.length
     });
   } catch (error) {
-    console.error('Delete contact error:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -99,13 +293,28 @@ router.delete('/deleteContact/:id', async (req, res) => {
   }
 });
 
-// Keep existing routes for backward compatibility
-router.get('/', async (req, res) => {
-  res.redirect('/getAllContacts');
-});
-
-router.post('/', async (req, res) => {
-  res.redirect(307, '/addContact'); // 307 preserves POST method
+// Get statistics
+router.get('/stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        COUNT(*) as total_emails,
+        COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent_emails,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_emails,
+        COUNT(DISTINCT batch_id) as total_batches
+      FROM automailer_schema.email_logs
+    `);
+    
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 module.exports = router;
