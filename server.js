@@ -2,9 +2,12 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+// Import database connection (this will also create schema and tables)
+require('./db');
+
 const contactRoutes = require('./routes/contacts');
 const emailRoutes = require('./routes/emails');
-const userRoutes = require('./routes/users'); // ✅ NEW: User routes
+const userRoutes = require('./routes/users');
 
 const app = express();
 
@@ -15,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // API routes
 app.use('/api', contactRoutes);
-app.use('/api', userRoutes); // ✅ NEW: User profile routes
+app.use('/api', userRoutes);
 app.use('/api/emails', emailRoutes);
 
 // Health check
@@ -23,6 +26,8 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     time: new Date(),
+    database: 'Connected to Render PostgreSQL',
+    environment: process.env.NODE_ENV || 'development',
     endpoints: [
       // Contact endpoints
       'GET /api/getAllContacts',
@@ -33,7 +38,7 @@ app.get('/api/health', (req, res) => {
       'POST /api/restoreContact/:id',
       'DELETE /api/permanentDelete/:id',
       
-      // ✅ NEW: User profile endpoints
+      // User profile endpoints
       'GET /api/user/profile',
       'POST /api/user/profile',
       'PUT /api/user/profile',
@@ -64,25 +69,31 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🗄️  Database: Render PostgreSQL`);
   console.log(`📍 API Endpoints:`);
   console.log(`   📋 Contacts:`);
-  console.log(`      GET  /api/getAllContacts`);
-  console.log(`      POST /api/addContact`);
-  console.log(`      PUT  /api/updateContact/:id`);
+  console.log(`      GET    /api/getAllContacts`);
+  console.log(`      POST   /api/addContact`);
+  console.log(`      PUT    /api/updateContact/:id`);
   console.log(`      DELETE /api/deleteContact/:id (soft)`);
-  console.log(`      GET  /api/getDeletedContacts`);
-  console.log(`      POST /api/restoreContact/:id`);
+  console.log(`      GET    /api/getDeletedContacts`);
+  console.log(`      POST   /api/restoreContact/:id`);
+  console.log(`      DELETE /api/permanentDelete/:id`);
   console.log(`   👤 User Profile:`);
-  console.log(`      GET  /api/user/profile`);
-  console.log(`      POST /api/user/profile`);
-  console.log(`      PUT  /api/user/profile`);
-  console.log(`      GET  /api/user/profile/check`);
+  console.log(`      GET    /api/user/profile`);
+  console.log(`      POST   /api/user/profile`);
+  console.log(`      PUT    /api/user/profile`);
+  console.log(`      GET    /api/user/profile/check`);
   console.log(`      DELETE /api/user/profile/:id`);
   console.log(`   📧 Emails:`);
-  console.log(`      POST /api/emails/bulk-send`);
-  console.log(`      POST /api/emails/send-individual`);
-  console.log(`      GET  /api/emails/logs`);
-  console.log(`      GET  /api/emails/stats`);
-  console.log(`      GET  /api/emails/status/:emailId`);
-  console.log(`      POST /api/emails/test-auth`);
+  console.log(`      POST   /api/emails/bulk-send`);
+  console.log(`      POST   /api/emails/send-individual`);
+  console.log(`      GET    /api/emails/logs`);
+  console.log(`      GET    /api/emails/stats`);
+  console.log(`      GET    /api/emails/status/:emailId`);
+  console.log(`      POST   /api/emails/test-auth`);
+  console.log(`   🔍 Health Check:`);
+  console.log(`      GET    /api/health`);
+  console.log(`────────────────────────────────────────────────`);
 });
