@@ -3,7 +3,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 // Import database connection (this will also create schema and tables)
-require('./db');
+require('./models/db');
 
 const contactRoutes = require('./routes/contacts');
 const emailRoutes = require('./routes/emails');
