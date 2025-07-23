@@ -20,7 +20,7 @@ const pool = new Pool({
     process.env.NODE_ENV === 'production'
       ? { rejectUnauthorized: false }
       : false,
-});
+}); 
 
 // Simple diagnostics
 pool.on('connect', () => console.log('✅ Connected to PostgreSQL'));
