@@ -43,12 +43,34 @@ const createSchemaAndTables = async () => {
     `);
     console.log('✅ Table created: automailer_schema.contacts');
 
-    // Create email logs table in schema
+    // Create user_profiles table (using "job_role" instead of "current_role")
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS automailer_schema.user_profiles (
+        id SERIAL PRIMARY KEY,
+        full_name VARCHAR(100) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        phone VARCHAR(20) NOT NULL,
+        linkedin VARCHAR(255),
+        github VARCHAR(255),
+        location VARCHAR(200) NOT NULL,
+        availability VARCHAR(100) NOT NULL,
+        experience_years VARCHAR(50) NOT NULL,
+        job_role VARCHAR(100),
+        skills TEXT[],
+        resume_filename VARCHAR(255),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Table created: automailer_schema.user_profiles');
+
+    // ✅ Create email logs table with CASCADE DELETE constraints
     await pool.query(`
       CREATE TABLE IF NOT EXISTS automailer_schema.email_logs (
         id SERIAL PRIMARY KEY,
         batch_id VARCHAR(100) NOT NULL,
-        contact_id INTEGER REFERENCES automailer_schema.contacts(id),
+        contact_id INTEGER REFERENCES automailer_schema.contacts(id) ON DELETE CASCADE,
+        user_profile_id INTEGER REFERENCES automailer_schema.user_profiles(id) ON DELETE CASCADE,
         email VARCHAR(255) NOT NULL,
         subject VARCHAR(500) NOT NULL,
         status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('sent', 'failed', 'pending')),
@@ -74,6 +96,7 @@ const createSchemaAndTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_contacts_deleted_at ON automailer_schema.contacts(deleted_at);
       CREATE INDEX IF NOT EXISTS idx_email_logs_batch_id ON automailer_schema.email_logs(batch_id);
       CREATE INDEX IF NOT EXISTS idx_email_logs_status ON automailer_schema.email_logs(status);
+      CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON automailer_schema.user_profiles(email);
     `);
     console.log('✅ Indexes created successfully');
 

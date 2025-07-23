@@ -1,12 +1,33 @@
-// templates/emailTemplate.js
-const getEmailTemplate = (contact, userEmail) => {
+// templates/emailTemplate.js - Updated with User Profile Support
+const getEmailTemplate = (contact, userProfile) => {
+  // Default values if userProfile is not provided
+  const senderName = userProfile?.fullName || 'Digvijay Bendre';
+  const senderEmail = userProfile?.email || 'digvijaybendre@gmail.com';
+  const senderPhone = userProfile?.phone || '+91-7517575972 / 7843075972';
+  const senderLinkedIn = userProfile?.linkedin || 'linkedin.com/in/digvijaybendre';
+  const senderGitHub = userProfile?.github || 'github.com/DigvijayBendre';
+  const senderLocation = userProfile?.location || 'Pune, Maharashtra (Open to relocation)';
+  const senderAvailability = userProfile?.availability || 'Available for immediate joining';
+  const experienceYears = userProfile?.experienceYears || '2+ years';
+  const currentRole = userProfile?.currentRole || contact.jobPosition;
+  
+  // Skills handling
+  let skillsDisplay = '';
+  if (userProfile?.skills && userProfile.skills.length > 0) {
+    skillsDisplay = userProfile.skills.join(', ');
+  } else {
+    skillsDisplay = contact.requiredSkills.join(', ');
+  }
+  
+  const topSkills = contact.requiredSkills.slice(0, 3).join(', ');
+  
   return `Dear ${contact.hrName},
 
-I am excited to apply for the ${contact.jobPosition} position at ${contact.companyName}. With 2+ years of experience as a ${contact.jobPosition}, I have developed strong expertise in ${contact.requiredSkills.slice(0, 3).join(', ')}.
+I am excited to apply for the ${contact.jobPosition} position at ${contact.companyName}. With ${experienceYears} of experience as a ${currentRole}, I have developed strong expertise in ${topSkills}.
 
 What I bring:
-• ${contact.jobPosition} experience with modern technologies
-• Hands-on experience in: ${contact.requiredSkills.join(', ')}
+• ${experienceYears} experience with modern technologies  
+• Hands-on experience in: ${skillsDisplay}
 • Strong problem-solving skills and ability to deliver clean, efficient code
 • Experience in building scalable web applications and RESTful APIs
 • Passion for learning new technologies and staying updated with industry trends
@@ -18,14 +39,14 @@ My resume is attached for your review. I would love to discuss how I can add val
 Thank you for your consideration.
 
 Best regards,
-Digvijay Bendre
+${senderName}
 
-📧 Email: ${userEmail}
-📱 Phone: +91-7517575972 / 7843075972
-🔗 LinkedIn: linkedin.com/in/digvijaybendre
-🌐 GitHub: github.com/DigvijayBendre
-📍 Location: Pune, Maharashtra (Open to relocation)
-💼 Availability: Available for immediate joining
+📧 Email: ${senderEmail}
+📱 Phone: ${senderPhone}
+🔗 LinkedIn: ${senderLinkedIn}
+🌐 GitHub: ${senderGitHub}
+📍 Location: ${senderLocation}
+💼 Availability: ${senderAvailability}
 
 P.S. I'm genuinely excited about this opportunity and would welcome a conversation about how I can contribute to ${contact.companyName}'s success story!`;
 };

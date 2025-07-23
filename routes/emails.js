@@ -4,7 +4,7 @@ const multer = require('multer');
 const nodemailer = require('nodemailer');
 const pool = require('../models/db');
 const fs = require('fs');
-const { getEmailTemplate } = require('../templates/emailTemplate'); // ✅ Import template
+const { getEmailTemplate } = require('../templates/emailTemplate');
 
 // ✅ DEBUG: Check environment variables on startup
 console.log('🔍 EMAIL CONFIG DEBUG:', {
@@ -93,13 +93,13 @@ Email: ${process.env.EMAIL_USER}
   }
 });
 
-// ✅ BULK EMAIL SEND - USING TEMPLATE FILE
+// ✅ BULK EMAIL SEND - WITH USER PROFILE SUPPORT
 router.post('/bulk-send', upload.single('resume'), async (req, res) => {
   try {
     console.log('📤 BULK EMAIL REQUEST RECEIVED');
     console.log('📎 File received:', req.file ? req.file.originalname : 'No file');
     
-    const { contactIds, contacts } = req.body;
+    const { contactIds, contacts, userProfile } = req.body;
     const resumeFile = req.file;
     
     if (!resumeFile) {
@@ -107,6 +107,43 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
         success: false,
         message: 'Resume file required'
       });
+    }
+
+    // Parse user profile data
+    let userProfileData = null;
+    if (userProfile) {
+      try {
+        userProfileData = JSON.parse(userProfile);
+        console.log('👤 User profile data received:', userProfileData.fullName);
+      } catch (e) {
+        console.log('⚠️ Failed to parse user profile, using default');
+      }
+    }
+
+    // If no user profile provided, try to get from database
+    if (!userProfileData) {
+      try {
+        const { rows } = await pool.query(
+          'SELECT * FROM automailer_schema.user_profiles ORDER BY created_at DESC LIMIT 1'
+        );
+        if (rows.length > 0) {
+          userProfileData = {
+            fullName: rows[0].full_name,
+            email: rows[0].email,
+            phone: rows[0].phone,
+            linkedin: rows[0].linkedin,
+            github: rows[0].github,
+            location: rows[0].location,
+            availability: rows[0].availability,
+            experienceYears: rows[0].experience_years,
+            currentRole: rows[0].job_role, // ✅ FIXED: job_role instead of current_role
+            skills: rows[0].skills
+          };
+          console.log('👤 User profile loaded from database:', userProfileData.fullName);
+        }
+      } catch (dbError) {
+        console.log('⚠️ Failed to load user profile from database:', dbError.message);
+      }
     }
 
     let contactsData = [];
@@ -117,7 +154,7 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
     } else if (contactIds) {
       console.log('📋 Using contactIds to fetch from database');
       const contactIdsArray = JSON.parse(contactIds);
-      const contactsQuery = `SELECT * FROM automailer_schema.contacts WHERE id = ANY($1)`;
+      const contactsQuery = `SELECT * FROM automailer_schema.contacts WHERE id = ANY($1) AND deleted_at IS NULL`;
       const contactsResult = await pool.query(contactsQuery, [contactIdsArray]);
       contactsData = contactsResult.rows.map(row => ({
         id: row.id,
@@ -125,7 +162,7 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
         email: row.email,
         companyName: row.company_name,
         jobPosition: row.job_position,
-        requiredSkills: row.required_skills // ✅ Ye array user se aayegi frontend se
+        requiredSkills: row.required_skills
       }));
     } else {
       return res.status(400).json({
@@ -142,30 +179,47 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
     }
 
     console.log(`📧 Starting Gmail bulk email process for ${contactsData.length} contacts`);
+    console.log(`👤 Using profile: ${userProfileData ? userProfileData.fullName : 'Default Profile'}`);
 
     const batchId = `batch_${Date.now()}`;
     const results = [];
+
+    // Get user profile ID for logging
+    let userProfileId = null;
+    if (userProfileData && userProfileData.email) {
+      try {
+        const { rows } = await pool.query(
+          'SELECT id FROM automailer_schema.user_profiles WHERE email = $1',
+          [userProfileData.email]
+        );
+        if (rows.length > 0) {
+          userProfileId = rows[0].id;
+        }
+      } catch (e) {
+        console.log('⚠️ Could not get user profile ID for logging');
+      }
+    }
 
     for (let i = 0; i < contactsData.length; i++) {
       const contact = contactsData[i];
       
       try {
-        // ✅ USING TEMPLATE FROM SEPARATE FILE
-        const emailContent = getEmailTemplate(contact, process.env.EMAIL_USER);
+        // ✅ USING TEMPLATE WITH USER PROFILE DATA
+        const emailContent = getEmailTemplate(contact, userProfileData);
         
-        console.log(`📧 Skills for ${contact.hrName}: ${contact.requiredSkills.join(', ')}`); // Debug skills
+        console.log(`📧 Skills for ${contact.hrName}: ${contact.requiredSkills ? contact.requiredSkills.join(', ') : 'No skills listed'}`);
 
-        const subject = `Application for ${contact.jobPosition} position at ${contact.companyName} - Digvijay Bendre`;
+        const subject = `Application for ${contact.jobPosition} position at ${contact.companyName} - ${userProfileData ? userProfileData.fullName : 'Digvijay Bendre'}`;
 
         const mailOptions = {
-          from: `Digvijay Bendre <${process.env.EMAIL_USER}>`,
+          from: `${userProfileData ? userProfileData.fullName : 'Digvijay Bendre'} <${process.env.EMAIL_USER}>`,
           to: contact.email,
           subject: subject,
-          text: emailContent, // ✅ Using template function
+          text: emailContent,
           attachments: [{
             filename: resumeFile.originalname,
             path: resumeFile.path,
-            contentType: 'application/pdf'
+            contentType: resumeFile.mimetype || 'application/pdf'
           }]
         };
 
@@ -173,12 +227,12 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
         
         const info = await transporter.sendMail(mailOptions);
         
-        // Log success to database
+        // Log success to database with user profile ID
         await pool.query(
           `INSERT INTO automailer_schema.email_logs 
-           (batch_id, contact_id, email, subject, status, message_id, resume_filename, sent_at) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [batchId, contact.id, contact.email, subject, 'sent', info.messageId, resumeFile.originalname, new Date()]
+           (batch_id, contact_id, user_profile_id, email, subject, status, message_id, resume_filename, sent_at) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [batchId, contact.id, userProfileId, contact.email, subject, 'sent', info.messageId, resumeFile.originalname, new Date()]
         );
 
         results.push({
@@ -187,12 +241,12 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
           email: contact.email,
           companyName: contact.companyName,
           jobPosition: contact.jobPosition,
-          skills: contact.requiredSkills, 
+          skills: contact.requiredSkills || [], 
           status: 'sent',
           messageId: info.messageId
         });
 
-        console.log(`✅ Email sent to: ${contact.hrName} with skills: ${contact.requiredSkills.join(', ')}`);
+        console.log(`✅ Email sent to: ${contact.hrName} with skills: ${contact.requiredSkills ? contact.requiredSkills.join(', ') : 'No skills'}`);
         
         // Gmail rate limiting
         if (i < contactsData.length - 1) {
@@ -205,9 +259,9 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
         
         await pool.query(
           `INSERT INTO automailer_schema.email_logs 
-           (batch_id, contact_id, email, subject, status, error_message, resume_filename) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [batchId, contact.id, contact.email, `Application for ${contact.jobPosition}`, 'failed', emailError.message, resumeFile.originalname]
+           (batch_id, contact_id, user_profile_id, email, subject, status, error_message, resume_filename) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [batchId, contact.id, userProfileId, contact.email, `Application for ${contact.jobPosition}`, 'failed', emailError.message, resumeFile.originalname]
         );
 
         results.push({
@@ -216,7 +270,7 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
           email: contact.email,
           companyName: contact.companyName,
           jobPosition: contact.jobPosition,
-          skills: contact.requiredSkills,
+          skills: contact.requiredSkills || [],
           status: 'failed',
           error: emailError.message
         });
@@ -265,13 +319,151 @@ router.post('/bulk-send', upload.single('resume'), async (req, res) => {
   }
 });
 
-// Get email logs
+// ✅ INDIVIDUAL EMAIL SEND
+router.post('/send-individual', upload.single('resume'), async (req, res) => {
+  try {
+    console.log('📤 INDIVIDUAL EMAIL REQUEST RECEIVED');
+    
+    const { contact, userProfile } = req.body;
+    const resumeFile = req.file;
+    
+    if (!resumeFile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Resume file required'
+      });
+    }
+
+    const contactData = JSON.parse(contact);
+    let userProfileData = null;
+
+    // Parse user profile data if provided
+    if (userProfile) {
+      try {
+        userProfileData = JSON.parse(userProfile);
+      } catch (e) {
+        console.log('⚠️ Failed to parse user profile for individual send');
+      }
+    }
+
+    // If no user profile provided, try to get from database
+    if (!userProfileData) {
+      try {
+        const { rows } = await pool.query(
+          'SELECT * FROM automailer_schema.user_profiles ORDER BY created_at DESC LIMIT 1'
+        );
+        if (rows.length > 0) {
+          userProfileData = {
+            fullName: rows[0].full_name,
+            email: rows[0].email,
+            phone: rows[0].phone,
+            linkedin: rows[0].linkedin,
+            github: rows[0].github,
+            location: rows[0].location,
+            availability: rows[0].availability,
+            experienceYears: rows[0].experience_years,
+            currentRole: rows[0].job_role, // ✅ FIXED: job_role instead of current_role
+            skills: rows[0].skills
+          };
+        }
+      } catch (dbError) {
+        console.log('⚠️ Failed to load user profile from database for individual send');
+      }
+    }
+
+    console.log(`📧 Sending individual email to: ${contactData.hrName}`);
+
+    const emailContent = getEmailTemplate(contactData, userProfileData);
+    const subject = `Application for ${contactData.jobPosition} position at ${contactData.companyName} - ${userProfileData ? userProfileData.fullName : 'Digvijay Bendre'}`;
+
+    const mailOptions = {
+      from: `${userProfileData ? userProfileData.fullName : 'Digvijay Bendre'} <${process.env.EMAIL_USER}>`,
+      to: contactData.email,
+      subject: subject,
+      text: emailContent,
+      attachments: [{
+        filename: resumeFile.originalname,
+        path: resumeFile.path,
+        contentType: resumeFile.mimetype || 'application/pdf'
+      }]
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+
+    // Get user profile ID for logging
+    let userProfileId = null;
+    if (userProfileData && userProfileData.email) {
+      try {
+        const { rows } = await pool.query(
+          'SELECT id FROM automailer_schema.user_profiles WHERE email = $1',
+          [userProfileData.email]
+        );
+        if (rows.length > 0) {
+          userProfileId = rows[0].id;
+        }
+      } catch (e) {
+        console.log('⚠️ Could not get user profile ID for individual send logging');
+      }
+    }
+
+    // Log to database
+    const batchId = `individual_${Date.now()}`;
+    await pool.query(
+      `INSERT INTO automailer_schema.email_logs 
+       (batch_id, contact_id, user_profile_id, email, subject, status, message_id, resume_filename, sent_at) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [batchId, contactData.id, userProfileId, contactData.email, subject, 'sent', info.messageId, resumeFile.originalname, new Date()]
+    );
+
+    // Clean up uploaded file
+    if (fs.existsSync(resumeFile.path)) {
+      fs.unlinkSync(resumeFile.path);
+    }
+
+    console.log(`✅ Individual email sent successfully to: ${contactData.hrName}`);
+
+    res.json({
+      success: true,
+      message: `Email sent successfully to ${contactData.hrName}`,
+      data: {
+        contactId: contactData.id,
+        hrName: contactData.hrName,
+        email: contactData.email,  
+        companyName: contactData.companyName,
+        status: 'sent',
+        messageId: info.messageId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ INDIVIDUAL EMAIL ERROR:', error);
+    
+    // Clean up file if error occurs
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send individual email',
+      error: error.message
+    });
+  }
+});
+
+// ✅ Get email logs with improved error handling
 router.get('/logs', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT el.*, c.hr_name, c.company_name 
+      SELECT 
+        el.*, 
+        c.hr_name, 
+        c.company_name,
+        up.full_name as sender_name,
+        up.email as sender_email
       FROM automailer_schema.email_logs el
       LEFT JOIN automailer_schema.contacts c ON el.contact_id = c.id
+      LEFT JOIN automailer_schema.user_profiles up ON el.user_profile_id = up.id
       ORDER BY el.created_at DESC
       LIMIT 50
     `);
@@ -282,6 +474,7 @@ router.get('/logs', async (req, res) => {
       count: result.rows.length
     });
   } catch (error) {
+    console.error('Error fetching email logs:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -289,7 +482,7 @@ router.get('/logs', async (req, res) => {
   }
 });
 
-// Get statistics
+// ✅ Get statistics with improved error handling
 router.get('/stats', async (req, res) => {
   try {
     const result = await pool.query(`
@@ -297,7 +490,8 @@ router.get('/stats', async (req, res) => {
         COUNT(*) as total_emails,
         COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent_emails,
         COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_emails,
-        COUNT(DISTINCT batch_id) as total_batches
+        COUNT(DISTINCT batch_id) as total_batches,
+        COUNT(DISTINCT user_profile_id) as unique_senders
       FROM automailer_schema.email_logs
     `);
     
@@ -306,6 +500,105 @@ router.get('/stats', async (req, res) => {
       data: result.rows[0]
     });
   } catch (error) {
+    console.error('Error fetching email stats:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ Get delivery status with improved error handling
+router.get('/status/:emailId', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        el.*, 
+        c.hr_name, 
+        c.company_name,
+        up.full_name as sender_name,
+        up.email as sender_email
+      FROM automailer_schema.email_logs el
+      LEFT JOIN automailer_schema.contacts c ON el.contact_id = c.id
+      LEFT JOIN automailer_schema.user_profiles up ON el.user_profile_id = up.id
+      WHERE el.id = $1
+    `, [req.params.emailId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Email log not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error fetching email status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ NEW: Get recent batches
+router.get('/batches', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        batch_id,
+        COUNT(*) as total_emails,
+        COUNT(CASE WHEN status = 'sent' THEN 1 END) as sent_count,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_count,
+        MIN(created_at) as batch_created_at,
+        up.full_name as sender_name
+      FROM automailer_schema.email_logs el
+      LEFT JOIN automailer_schema.user_profiles up ON el.user_profile_id = up.id
+      GROUP BY batch_id, up.full_name
+      ORDER BY batch_created_at DESC
+      LIMIT 20
+    `);
+    
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching email batches:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ✅ NEW: Get emails by batch ID
+router.get('/batch/:batchId', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        el.*, 
+        c.hr_name, 
+        c.company_name,
+        up.full_name as sender_name
+      FROM automailer_schema.email_logs el
+      LEFT JOIN automailer_schema.contacts c ON el.contact_id = c.id
+      LEFT JOIN automailer_schema.user_profiles up ON el.user_profile_id = up.id
+      WHERE el.batch_id = $1
+      ORDER BY el.created_at ASC
+    `, [req.params.batchId]);
+    
+    res.json({
+      success: true,
+      data: result.rows,
+      count: result.rows.length
+    });
+  } catch (error) {
+    console.error('Error fetching batch emails:', error);
     res.status(500).json({
       success: false,
       error: error.message

@@ -4,16 +4,18 @@ require('dotenv').config();
 
 const contactRoutes = require('./routes/contacts');
 const emailRoutes = require('./routes/emails');
+const userRoutes = require('./routes/users'); // ✅ NEW: User routes
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true })); 
 
 // API routes
 app.use('/api', contactRoutes);
+app.use('/api', userRoutes); // ✅ NEW: User profile routes
 app.use('/api/emails', emailRoutes);
 
 // Health check
@@ -22,6 +24,7 @@ app.get('/api/health', (req, res) => {
     status: 'OK', 
     time: new Date(),
     endpoints: [
+      // Contact endpoints
       'GET /api/getAllContacts',
       'POST /api/addContact',
       'PUT /api/updateContact/:id',
@@ -29,9 +32,21 @@ app.get('/api/health', (req, res) => {
       'GET /api/getDeletedContacts',
       'POST /api/restoreContact/:id',
       'DELETE /api/permanentDelete/:id',
+      
+      // ✅ NEW: User profile endpoints
+      'GET /api/user/profile',
+      'POST /api/user/profile',
+      'PUT /api/user/profile',
+      'GET /api/user/profile/check',
+      'DELETE /api/user/profile/:id',
+      
+      // Email endpoints
       'POST /api/emails/bulk-send',
+      'POST /api/emails/send-individual',
       'GET /api/emails/logs',
-      'GET /api/emails/stats'
+      'GET /api/emails/stats',
+      'GET /api/emails/status/:emailId',
+      'POST /api/emails/test-auth'
     ]
   });
 });
@@ -57,8 +72,17 @@ app.listen(PORT, () => {
   console.log(`      DELETE /api/deleteContact/:id (soft)`);
   console.log(`      GET  /api/getDeletedContacts`);
   console.log(`      POST /api/restoreContact/:id`);
+  console.log(`   👤 User Profile:`);
+  console.log(`      GET  /api/user/profile`);
+  console.log(`      POST /api/user/profile`);
+  console.log(`      PUT  /api/user/profile`);
+  console.log(`      GET  /api/user/profile/check`);
+  console.log(`      DELETE /api/user/profile/:id`);
   console.log(`   📧 Emails:`);
   console.log(`      POST /api/emails/bulk-send`);
+  console.log(`      POST /api/emails/send-individual`);
   console.log(`      GET  /api/emails/logs`);
   console.log(`      GET  /api/emails/stats`);
+  console.log(`      GET  /api/emails/status/:emailId`);
+  console.log(`      POST /api/emails/test-auth`);
 });
