@@ -11,8 +11,27 @@ const userRoutes = require('./routes/users');
 
 const app = express();
 
+// ✅ UPDATED: Proper CORS configuration with specific origins
+app.use(cors({
+  origin: [
+    'http://localhost:3000',                              // Local React dev
+    'http://localhost:5173',                              // Vite dev server
+    'https://automailer-by-jay.onrender.com',            // ✅ Your frontend URL
+    'https://servise-automailer-1.onrender.com'          // ✅ Your backend URL
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
+  optionsSuccessStatus: 200 // For legacy browser support
+}));
+
 // Middleware
-app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); 
 
@@ -28,6 +47,10 @@ app.get('/api/health', (req, res) => {
     time: new Date(),
     database: 'Connected to Render PostgreSQL',
     environment: process.env.NODE_ENV || 'development',
+    corsOrigins: [
+      'https://automailer-by-jay.onrender.com',
+      'https://servise-automailer-1.onrender.com'
+    ],
     endpoints: [
       // Contact endpoints
       'GET /api/getAllContacts',
@@ -71,6 +94,10 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🗄️  Database: Render PostgreSQL`);
+  console.log(`🔗 CORS Configuration:`);
+  console.log(`   ✅ Frontend: https://automailer-by-jay.onrender.com`);
+  console.log(`   ✅ Backend:  https://servise-automailer-1.onrender.com`);
+  console.log(`   ✅ Local:    http://localhost:3000, http://localhost:5173`);
   console.log(`📍 API Endpoints:`);
   console.log(`   📋 Contacts:`);
   console.log(`      GET    /api/getAllContacts`);
